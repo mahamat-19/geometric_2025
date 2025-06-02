@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cubic B-Spline Interpolation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        canvas {
+            border: 1px solid #000;
+            margin-top: 20px;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 8px 15px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Cubic B-Spline Interpolation</h1>
+
+    <div class="controls">
+        <button id="addPoint">Add Point</button>
+        <button id="clear">Clear Points</button>
+        <div>
+            <label>
+                <input type="checkbox" id="showControlPoints" checked>
+                Show Control Points
+            </label>
+            <label>
+                <input type="checkbox" id="showInterpolationPoints" checked>
+                Show Interpolation Points
+            </label>
+        </div>
+    </div>
+
+    <canvas id="canvas" width="800" height="500"></canvas>
+
+    <script>
+        class BSplineInterpolator {
+            /**
+             * Interpolates the given points with a cubic B-spline curve
+             * @param {Array} points - Points to interpolate (as {x,y} objects)
+             * @param {number} numSegments - Number of segments for the final curve
+             */
+            static interpolate(points, numSegments = 100) {
+                const degree = 3;
+                const n = points.length - 1;
+
+                if (n < degree) {
+                    // Not enough points for cubic interpolation
+                    return points;
+                }
+
+                // Create uniform parameter values
+                const params = [];
+                for (let i = 0; i <= n; i++) {
+                    params.push(i / n);
+                }
+
+                // Create knot vector
+                const knots = [];
+                for (let i = 0; i <= degree; i++) {
+                    knots.push(0);
+                }
+                for (let i = 1; i <= n - degree; i++) {
+                    knots.push(i / (n - degree + 1));
+                }
+                for (let i = 0; i <= degree; i++) {
+                    knots.push(1);
+                }
+
+                // Build coefficient matrix
+                const N = [];
+                for (let i = 0; i <= n; i++) {
+                    const row = [];
+                    for (let j = 0; j <= n; j++) {
+                        row.push(this.basisFunction(j, degree, knots, params[i]));
+                    }
+                    N.push(row);
+                }
+
+                // Solve for control points
+                const controlPoints = this.solveSystem(N, points);
+
+                // Create the interpolated curve
+                const curve = [];
+                const spline = new BSpline(controlPoints, degree, knots);
+
+                for (let i = 0; i <= numSegments; i++) {
+                    const t = i / numSegments;
+                    curve.push(spline.evaluate(t));
+                }
+
+                return {
+                    controlPoints: controlPoints,
+                    curve: curve
+                };
+            }
+
+            // Basis function (non-recursive for better performance)
+            static basisFunction(i, degree, knots, t) {
+                if (degree === 0) {
+                    return (t >= knots[i] && t < knots[i + 1]) ? 1 : 0;
+                }
+
+                const denom1 = knots[i + degree] - knots[i];
+                const denom2 = knots[i + degree + 1] - knots[i + 1];
+
+                let term1 = 0;
+                let term2 = 0;
+
+                if (denom1 !== 0) {
+                    term1 = ((t - knots[i]) / denom1) * this.basisFunction(i, degree - 1, knots, t);
+                }
+
+                if (denom2 !== 0) {
+                    term2 = ((knots[i + degree + 1] - t) / denom2) * this.basisFunction(i + 1, degree - 1, knots, t);
+                }
+
+                return term1 + term2;
+            }
+
+            // Solve the system N * P = Q for P (control points)
+            static solveSystem(N, Q) {
+                // Using simple Gaussian elimination
+                const n = Q.length;
+                const P = new Array(n);
+
+                // Clone the matrix and vector
+                const A = N.map(row => [...row]);
+                const b = Q.map(p => ({ ...p }));
+
+                // Forward elimination
+                for (let i = 0; i < n; i++) {
+                    // Find pivot row
+                    let maxRow = i;
+                    for (let j = i + 1; j < n; j++) {
+                        if (Math.abs(A[j][i]) > Math.abs(A[maxRow][i])) {
+                            maxRow = j;
+                        }
+                    }
+
+                    // Swap rows
+                    [A[i], A[maxRow]] = [A[maxRow], A[i]];
+                    [b[i], b[maxRow]] = [b[maxRow], b[i]];
+
+                    // Eliminate column
+                    for (let j = i + 1; j < n; j++) {
+                        const factor = A[j][i] / A[i][i];
+                        for (let k = i; k < n; k++) {
+                            A[j][k] -= factor * A[i][k];
+                        }
+                        b[j].x -= factor * b[i].x;
+                        b[j].y -= factor * b[i].y;
+                    }
+                }
+
+                // Back substitution
+                for (let i = n - 1; i >= 0; i--) {
+                    let sumX = 0;
+                    let sumY = 0;
+                    for (let j = i + 1; j < n; j++) {
+                        sumX += A[i][j] * P[j].x;
+                        sumY += A[i][j] * P[j].y;
+                    }
+
+                    P[i] = {
+                        x: (b[i].x - sumX) / A[i][i],
+                        y: (b[i].y - sumY) / A[i][i]
+                    };
+                }
+
+                return P;
+            }
+        }
+
+        class BSpline {
+            constructor(controlPoints, degree = 3, knots = null) {
+                this.controlPoints = controlPoints;
+                this.degree = degree;
+                this.knots = knots || this.createUniformKnots(controlPoints.length, degree);
+            }
+
+            createUniformKnots(numControlPoints, degree) {
+                const numKnots = numControlPoints + degree + 1;
+                const knots = [];
+
+                // Start with 'degree+1' zeros
+                for (let i = 0; i <= degree; i++) {
+                    knots.push(0);
+                }
+
+                // Add internal knots
+                const internalPoints = numControlPoints - degree - 1;
+                if (internalPoints > 0) {
+                    const step = 1.0 / (internalPoints + 1);
+                    for (let i = 1; i <= internalPoints; i++) {
+                        knots.push(i * step);
+                    }
+                }
+
+                // End with 'degree+1' ones
+                for (let i = 0; i <= degree; i++) {
+                    knots.push(1);
+                }
+
+                return knots;
+            }
+
+            basisFunction(i, degree, knots, t) {
+                if (degree === 0) {
+                    return (t >= knots[i] && t < knots[i + 1]) ? 1 : 0;
+                }
+
+                const denom1 = knots[i + degree] - knots[i];
+                const denom2 = knots[i + degree + 1] - knots[i + 1];
+
+                let term1 = 0;
+                let term2 = 0;
+
+                if (denom1 !== 0) {
+                    term1 = ((t - knots[i]) / denom1) * this.basisFunction(i, degree - 1, knots, t);
+                }
+
+                if (denom2 !== 0) {
+                    term2 = ((knots[i + degree + 1] - t) / denom2) * this.basisFunction(i + 1, degree - 1, knots, t);
+                }
+
+                return term1 + term2;
+            }
+
+            evaluate(t) {
+                t = Math.max(0, Math.min(1, t));
+                let span = this.findKnotSpan(t);
+
+                const basisValues = [];
+                for (let i = 0; i <= this.degree; i++) {
+                    basisValues.push(this.basisFunction(span - this.degree + i, this.degree, this.knots, t));
+                }
+
+                const result = { x: 0, y: 0 };
+                for (let i = 0; i <= this.degree; i++) {
+                    const idx = span - this.degree + i;
+                    result.x += this.controlPoints[idx].x * basisValues[i];
+                    result.y += this.controlPoints[idx].y * basisValues[i];
+                }
+                return result;
+            }
+
+            findKnotSpan(t) {
+                const n = this.controlPoints.length - 1;
+                const m = this.knots.length - 1;
+
+                if (t >= this.knots[m - this.degree - 1]) {
+                    return n;
+                }
+
+                let low = this.degree;
+                let high = n + 1;
+                let mid = Math.floor((low + high) / 2);
+
+                while (t < this.knots[mid] || t >= this.knots[mid + 1]) {
+                    if (t < this.knots[mid]) {
+                        high = mid;
+                    } else {
+                        low = mid;
+                    }
+                    mid = Math.floor((low + high) / 2);
+                }
+
+                return mid;
+            }
+        }
+
+        // Main application
+        class BSplineApp {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.points = [];
+                this.interpolationResult = null;
+
+                this.setupEventListeners();
+                this.draw();
+            }
+
+            setupEventListeners() {
+                // Add point on canvas click
+                this.canvas.addEventListener('click', (e) => {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    this.points.push({ x, y });
+                    this.updateInterpolation();
+                    this.draw();
+                });
+
+                // Add point button
+                document.getElementById('addPoint').addEventListener('click', () => {
+                    const x = 50 + Math.random() * (this.canvas.width - 100);
+                    const y = 50 + Math.random() * (this.canvas.height - 100);
+                    this.points.push({ x, y });
+                    this.updateInterpolation();
+                    this.draw();
+                });
+
+                // Clear button
+                document.getElementById('clear').addEventListener('click', () => {
+                    this.points = [];
+                    this.interpolationResult = null;
+                    this.draw();
+                });
+
+                // Toggle controls
+                document.getElementById('showControlPoints').addEventListener('change', () => this.draw());
+                document.getElementById('showInterpolationPoints').addEventListener('change', () => this.draw());
+            }
+
+            updateInterpolation() {
+                if (this.points.length >= 4) { // Need at least degree+1 points (4 for cubic)
+                    this.interpolationResult = BSplineInterpolator.interpolate(this.points, 100);
+                } else {
+                    this.interpolationResult = null;
+                }
+            }
+
+            draw() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Draw interpolation points
+                if (document.getElementById('showInterpolationPoints').checked) {
+                    this.drawPoints(this.points, 'red', 6);
+                }
+
+                // Draw control points if available
+                if (this.interpolationResult && document.getElementById('showControlPoints').checked) {
+                    this.drawPoints(this.interpolationResult.controlPoints, 'blue', 4);
+
+                    // Draw lines between control points
+                    this.ctx.strokeStyle = 'rgba(0, 0, 255, 0.3)';
+                    this.ctx.lineWidth = 1;
+                    this.ctx.beginPath();
+                    this.interpolationResult.controlPoints.forEach((p, i) => {
+                        if (i === 0) {
+                            this.ctx.moveTo(p.x, p.y);
+                        } else {
+                            this.ctx.lineTo(p.x, p.y);
+                        }
+                    });
+                    this.ctx.stroke();
+                }
+
+                // Draw the interpolated curve
+                if (this.interpolationResult) {
+                    this.ctx.strokeStyle = 'green';
+                    this.ctx.lineWidth = 3;
+                    this.ctx.beginPath();
+                    this.interpolationResult.curve.forEach((p, i) => {
+                        if (i === 0) {
+                            this.ctx.moveTo(p.x, p.y);
+                        } else {
+                            this.ctx.lineTo(p.x, p.y);
+                        }
+                    });
+                    this.ctx.stroke();
+                } else if (this.points.length > 1) {
+                    // Draw simple polyline if not enough points for interpolation
+                    this.ctx.strokeStyle = 'gray';
+                    this.ctx.lineWidth = 1;
+                    this.ctx.beginPath();
+                    this.points.forEach((p, i) => {
+                        if (i === 0) {
+                            this.ctx.moveTo(p.x, p.y);
+                        } else {
+                            this.ctx.lineTo(p.x, p.y);
+                        }
+                    });
+                    this.ctx.stroke();
+                }
+            }
+            drawPoints(points, color, radius) {
+                this.ctx.fillStyle = color;
+                points.forEach(p => {
+                    this.ctx.beginPath();
+                    this.ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                });
+            }
+        }
+        // Initialize the application when the page loads
+        window.onload = () => {
+            new BSplineApp();
+        };
+    </script>
+</body>
+</html>
