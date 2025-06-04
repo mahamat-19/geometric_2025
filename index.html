@@ -1,19 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <title>Cubic B-Spline Interpolation</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cubic B-Spline Interpolation</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             padding: 20px;
         }
+
         canvas {
             border: 1px solid #000;
             display: block;
             margin-top: 20px;
         }
+
         .controls {
             margin-bottom: 20px;
         }
@@ -24,6 +27,7 @@
         }
     </style>
 </head>
+
 <body>
     <h2>Cubic B-Spline Interpolation</h2>
     <div class="controls">
@@ -36,109 +40,522 @@
     <canvas id="canvas" width="800" height="400"></canvas>
 
     <script>
-        class BSplineApp {
+        // Constants
+        const POINT_RADIUS = 5;
+
+        // Global variables
+        var canvas = null;
+        var canvasPosition = null;
+        var context = null;
+        var screen = null;
+
+        function initialize() {
+            initCanvas();
+            screen = new Screen();
+            initContent();
+            resize();
+        }
+
+        window.addEventListener("load", initialize, false);
+        window.addEventListener("resize", resize, false);
+
+        function initCanvas() {
+            canvas = document.getElementById("canvas");
+            canvasPosition = canvas.getBoundingClientRect();
+            canvas.addEventListener("mousedown", MouseDown, false);
+            canvas.addEventListener("mousemove", MouseMove, false);
+            canvas.addEventListener("mouseup", MouseUp, false);
+            canvas.addEventListener("wheel", MouseWheel, false);
+            canvas.addEventListener("contextmenu", function (e) {
+                e.preventDefault();
+            });
+            window.addEventListener("keyup", KeyUp, false);
+            context = canvas.getContext("2d");
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            canvasPosition = canvas.getBoundingClientRect();
+            screen.resize({
+                width: canvas.width,
+                height: canvas.height
+            });
+            screen.draw(context);
+        }
+
+        function calcMouseEvent(event) {
+            return {
+                x: event.clientX - canvasPosition.left,
+                y: event.clientY - canvasPosition.top
+            };
+        }
+
+        function MouseDown(event) {
+            var mouse = calcMouseEvent(event);
+            screen.handleMouseDown(mouse);
+            screen.draw(context);
+        }
+
+        function MouseMove(event) {
+            var mouse = calcMouseEvent(event);
+            screen.handleMouseMove(mouse);
+            screen.draw(context);
+        }
+
+        function MouseUp(event) {
+            var mouse = calcMouseEvent(event);
+            screen.handleMouseUp(mouse);
+            screen.draw(context);
+        }
+
+        function MouseWheel(event) {
+            const mouse = calcMouseEvent(event);
+            const delta = event.wheelDelta;
+            event.preventDefault();
+        }
+
+        function KeyUp(event) {
+            screen.handleKeyUp(event);
+            screen.draw(context);
+        }
+
+        class Panel {
             constructor() {
-                this.canvas = document.getElementById('canvas');
-                this.ctx = this.canvas.getContext('2d');
-                this.points = [];
-                this.bindEvents();
-                this.draw();
-            }
-            bindEvents() {
-                this.canvas.addEventListener('click', (e) => {
-                    const rect = this.canvas.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
-                    this.points.push({ x, y });
-                    this.draw();
-                });
-                document.getElementById('addPoint').addEventListener('click', () => {
-                    const x = Math.random() * this.canvas.width;
-                    const y = Math.random() * this.canvas.height;
-                    this.points.push({ x, y });
-                    this.draw();
-                });
-                document.getElementById('clearPoints').addEventListener('click', () => {
-                    this.points = [];
-                    this.draw();
-                });
-
-                document.getElementById('showControl').addEventListener('change', () => {
-                    this.draw();
-                });
+                this.x = 0;
+                this.y = 0;
+                this.width = 0;
+                this.height = 0;
+                this.parent = null;
+                this.children = [];
+                this.isRedrawNeeded = true;
             }
 
-            draw() {
-                const ctx = this.ctx;
-                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            addChild(child) {
+                child.parent = this;
+                this.children.push(child);
+            }
 
-                if (document.getElementById('showControl').checked) {
-                    this.drawPoints(this.points, 'red', 5);
-                }
+            _resize() {
+                this.resize();
+                this.resizeChildren();
+                this.requireRedraw();
+            }
 
-                const curve = this.computeBSpline(this.points, 20);
-                if (curve.length > 0) {
-                    ctx.beginPath();
-                    ctx.strokeStyle = 'green';
-                    ctx.lineWidth = 2;
-                    curve.forEach((p, i) => {
-                        if (i === 0) {
-                            ctx.moveTo(p.x, p.y);
-                        } else {
-                            ctx.lineTo(p.x, p.y);
-                        }
-                    });
-                    ctx.stroke();
+            resize() {
+            }
+
+            resizeChildren() {
+                for (let child of this.children) {
+                    child._resize();
                 }
             }
 
-            drawPoints(points, color, radius) {
-                const ctx = this.ctx;
-                ctx.fillStyle = color;
-                points.forEach(p => {
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-                    ctx.fill();
-                });
-            }
-
-            computeBSpline(points, segmentsPerSpan = 20) {
-                if (points.length < 4) return [];
-
-                const result = [];
-
-                for (let i = 1; i < points.length - 2; i++) {
-                    const p0 = points[i - 1];
-                    const p1 = points[i];
-                    const p2 = points[i + 1];
-                    const p3 = points[i + 2];
-
-                    for (let t = 0; t <= 1; t += 1 / segmentsPerSpan) {
-                        const x = this.bSplineFormula(p0.x, p1.x, p2.x, p3.x, t);
-                        const y = this.bSplineFormula(p0.y, p1.y, p2.y, p3.y, t);
-                        result.push({ x, y });
+            findCursor(position) {
+                for (let child of this.children) {
+                    if (position.x >= child.x &&
+                        position.x < child.x + child.width &&
+                        position.y >= child.y &&
+                        position.y < child.y + child.height
+                    ) {
+                        let relativePosition = {
+                            x: position.x - child.x,
+                            y: position.y - child.y
+                        };
+                        return child.findCursor(relativePosition);
                     }
                 }
-
-                return result;
+                let cursor = {
+                    x: position.x,
+                    y: position.y,
+                    panel: this
+                };
+                return cursor;
             }
 
-            bSplineFormula(p0, p1, p2, p3, t) {
-                const t2 = t * t;
-                const t3 = t2 * t;
+            onMouseDown(mouse) {
+            }
 
-                return (
-                    (1 / 6) *
-                    ((-p0 + 3 * p1 - 3 * p2 + p3) * t3 +
-                        (3 * p0 - 6 * p1 + 3 * p2) * t2 +
-                        (-3 * p0 + 3 * p2) * t +
-                        (p0 + 4 * p1 + p2))
-                );
+            onMouseMove(mouse) {
+            }
+
+            onMouseUp(mouse) {
+            }
+
+            onKeyDown(key) {
+            }
+
+            onKeyUp(key) {
+            }
+
+            startDragging(dragging) {
+                if (dragging.mode == "internal") {
+                    dragging.offset = {
+                        x: 0,
+                        y: 0
+                    };
+                }
+                this._startDragging(dragging);
+            }
+
+            _startDragging(dragging) {
+                if (this.parent != null) {
+                    if (dragging.mode == "internal") {
+                        dragging.offset.x += this.x;
+                        dragging.offset.y += this.y;
+                    }
+                    this.parent._startDragging(dragging);
+                } else {
+                    screen._dragging = dragging;
+                }
+            }
+
+            onDragging(dragging, mouse) {
+            }
+
+            onDrop(dragging, mouse) {
+            }
+
+            requireRedraw() {
+                this.isRedrawNeeded = true;
+                if (this.parent != null) {
+                    if (this.parent.isRedrawNeeded == false) {
+                        this.parent.requireRedraw();
+                    }
+                }
+            }
+
+            _draw(context) {
+                if (this.isRedrawNeeded == true) {
+                    this.draw(context);
+                    this.drawChildren(context);
+                    this.drawOverlay(context);
+                    this.isRedrawNeeded = false;
+                }
+            }
+
+            draw(context) {
+            }
+
+            drawOverlay(context) {
+            }
+
+            drawChildren(context) {
+                for (let child of this.children) {
+                    context.save();
+                    context.translate(child.x, child.y);
+                    child._draw(context);
+                    context.restore();
+                }
             }
         }
-        window.onload = () => {
-            new BSplineApp();
-        };
+
+        class Screen {
+            constructor() {
+                this._dimension = null;
+                this._root = null;
+                this._cursor = null;
+                this._dragging = null;
+            }
+
+            resize(dimension) {
+                this._dimension = dimension;
+                if (this._root != null) {
+                    this._root.width = dimension.width;
+                    this._root.height = dimension.height;
+                    this._root._resize();
+                }
+            }
+
+            setRoot(panel) {
+                this._root = panel;
+                if (this._root != null) {
+                    this._root._resize();
+                }
+            }
+
+            handleMouseDown(mouse) {
+                this.updateCursor(mouse);
+                if (this._cursor.panel != null) {
+                    let m = {
+                        x: this._cursor.x,
+                        y: this._cursor.y,
+                        button: mouse.button
+                    }
+                    this._cursor.panel.onMouseDown(m);
+                }
+            }
+
+            handleMouseMove(mouse) {
+                this.updateCursor(mouse);
+                if (this._cursor.panel != null) {
+                    let m = {
+                        x: this._cursor.x,
+                        y: this._cursor.y
+                    }
+                    this._cursor.panel.onMouseMove(m);
+                }
+                if (this._dragging != null) {
+                    switch (this._dragging.mode) {
+                        case "internal":
+                            let m = {
+                                x: mouse.x - this._dragging.offset.x,
+                                y: mouse.y - this._dragging.offset.y,
+                                button: this._dragging.mouse.button
+                            }
+                            this._dragging.panel.onDragging(this._dragging, m);
+                            break;
+                        case "external":
+                            break;
+                    }
+                }
+            }
+
+            handleMouseUp(mouse) {
+                this.updateCursor(mouse);
+                if (this._cursor.panel != null) {
+                    let m = {
+                        x: this._cursor.x,
+                        y: this._cursor.y,
+                        button: mouse.button
+                    }
+                    this._cursor.panel.onMouseUp(m);
+                }
+                if (this._dragging != null) {
+                    switch (this._dragging.mode) {
+                        case "internal":
+                            let m = {
+                                x: mouse.x - this._dragging.offset.x,
+                                y: mouse.y - this._dragging.offset.y,
+                                button: this._dragging.mouse.button
+                            }
+                            this._dragging.panel.onDrop(this._dragging, m);
+                            break;
+                        case "external":
+                            break;
+                    }
+                    this._dragging = null;
+                }
+            }
+
+            updateCursor(position) {
+                if (this._root != null) {
+                    this._cursor = this._root.findCursor(position);
+                } else {
+                    this._cursor = null;
+                }
+            }
+
+            handleKeyDown(key) {
+                if (key.repeat == true) {
+                    return;
+                }
+                if (this._cursor != null && this._cursor.panel != null) {
+                    this._cursor.panel.onKeyDown(key);
+                }
+            }
+
+            handleKeyUp(key) {
+                if (this._cursor != null && this._cursor.panel != null) {
+                    this._cursor.panel.onKeyUp(key);
+                }
+            }
+
+            draw(context) {
+                if (this._root != null) {
+                    this._root._draw(context);
+                }
+            }
+        }
+
+        class BSpline {
+            constructor() {
+                this._points = [];
+                this._knots = [];
+            }
+
+            setPointsAndKnots(points, knots) {
+                this._points = points;
+                this._knots = knots;
+            }
+
+            calcNormBase(i, k, u) {
+                if (k == 1) {
+                    if (this._knots[i] <= u && u < this._knots[i + 1]) {
+                        return 1;
+                    } else {
+                        return 0;
+                    }
+                } else {
+                    let a = (u - this._knots[i]) / (this._knots[i + k - 1] - this._knots[i]);
+                    let b = (this._knots[i + k] - u) / (this._knots[i + k] - this._knots[i + 1]);
+                    let na = this.calcNormBase(i, k - 1, u);
+                    let nb = this.calcNormBase(i + 1, k - 1, u);
+                    return a * na + b * nb;
+                }
+            }
+
+            calcPolyline(k) {
+                let polyline = [];
+                let n = this._points.length;
+                let u = this._knots[k - 1];
+                while (u < this._knots[n]) {
+                    let x = 0.0;
+                    let y = 0.0;
+                    for (let i = 0; i < this._points.length; i++) {
+                        let w = this.calcNormBase(i, k, u);
+                        x += w * this._points[i].x;
+                        y += w * this._points[i].y;
+                    }
+                    polyline.push({ x: x, y: y });
+                    u += 0.1;
+                }
+                return polyline;
+            }
+        }
+
+        function initContent() {
+            let splinePanel = new SplinePanel();
+            screen.setRoot(splinePanel);
+        }
+
+        class SplinePanel extends Panel {
+            constructor() {
+                super();  // Fixed: Removed great() and added super()
+                this._points = [
+                    { x: 100, y: 100 },
+                    
+                ];
+                this._selectedPoint = null;
+                this._bspline = new BSpline();
+                this._order = 2;
+                this._polyline = [];
+                this.updateSpline();
+            } 
+
+            onMouseDown(mouse) {
+                this._selectedPoint = this.findPoint(mouse.x, mouse.y);
+            }
+
+            onMouseMove(mouse) {
+                if (this._selectedPoint != null) {
+                    this._selectedPoint.x = mouse.x;
+                    this._selectedPoint.y = mouse.y;
+                    this.updateSpline();
+                }
+                this.requireRedraw();
+            }
+
+            onMouseUp(mouse) {
+                this._selectedPoint = null;
+            }
+
+            onKeyDown(key) {
+                if (key.key == "i") {
+                    this._order++;
+                    this.updateSpline();
+                    this.requireRedraw();
+                } else if (key.key == "k") {
+                    this._order--;
+                    if (this._order < 2) {
+                        this._order = 2;
+                    }
+                    this.updateSpline();
+                    this.requireRedraw();
+                }
+            }
+
+            findPoint(x, y) {
+                for (var point of this._points) {
+                    const dx = point.x - x;
+                    const dy = point.y - y;
+                    let distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance < POINT_RADIUS) {
+                        return point;
+                    }
+                }
+                return null;
+            }
+
+            updateSpline() {
+                let knots = [];
+                for (let i = 0; i < this._points.length + this._order; ++i) {
+                    knots.push(i);
+                }
+                this._bspline.setPointsAndKnots(this._points, knots);
+                this._polyline = this._bspline.calcPolyline(this._order);
+            }
+
+            draw(context) {
+                context.fillStyle = "#FFF";
+                context.fillRect(0, 0, this.width, this.height);
+                this.drawPoints(context);
+
+                context.strokeStyle = "#AAA";
+                context.lineWidth = 1;
+                context.beginPath();
+                context.moveTo(this._points[0].x, this._points[0].y);
+                for (let i = 1; i < this._points.length; i++) {
+                    context.lineTo(this._points[i].x, this._points[i].y);
+                }
+                context.stroke();
+
+                this.drawPolyline(context, this._polyline);
+            }
+
+            drawPoints(context) {
+                for (const point of this._points) {
+                    this.drawPoint(context, point);
+                }
+            }
+
+            drawPoint(context, point) {
+                context.strokeStyle = "#00F";
+                context.lineWidth = 1;
+                context.beginPath();
+                context.moveTo(point.x - POINT_RADIUS, point.y);
+                context.lineTo(point.x + POINT_RADIUS, point.y);
+                context.stroke();
+                context.beginPath();
+                context.moveTo(point.x, point.y - POINT_RADIUS);
+                context.lineTo(point.x, point.y + POINT_RADIUS);
+                context.stroke();
+            }
+
+            drawPolyline(context, points) {
+                if (points.length == 0) return;
+
+                context.strokeStyle = "#F00";
+                context.lineWidth = 2;
+                context.beginPath();
+                context.moveTo(points[0].x, points[0].y);
+                for (let i = 1; i < points.length; i++) {
+                    context.lineTo(points[i].x, points[i].y);
+                }
+                context.stroke();
+            }
+        }
+    </script>
+
+    <script>
+        document.getElementById("addPoint").addEventListener("click", function () {
+            const newPoint = { x: Math.random() * canvas.width, y: Math.random() * canvas.height };
+            screen._root._points.push(newPoint);
+            screen._root.updateSpline();
+            screen.draw(context);
+        });
+
+        document.getElementById("clearPoints").addEventListener("click", function () {
+            screen._root._points = [];
+            screen._root.updateSpline();
+            screen.draw(context);
+        });
+
+        document.getElementById("showControl").addEventListener("change", function (event) {
+            // Logic to show/hide control points can be added here
+            screen.draw(context);
+        });
     </script>
 </body>
+
 </html>
