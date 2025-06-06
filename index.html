@@ -120,6 +120,96 @@
             screen.draw(context);
         }
 
+        function computecontrolPoints(Interpolationpoints) {
+            const n = Interpolationpoints.length ;
+            const degree = 3; // Cubic B-spline
+            const knotcount = n + degree + 1;
+
+            // uniform knot vector
+            const knots = [];
+            for (let i = 0; i < knotcount; i++) {
+                if (i < degree) {
+                    knots.push(0);
+                } else if (i >n) knots.push(n - degree + 1);
+                 else {
+                    knots.push(i - degree);
+                }
+        }
+
+        // basic matrix for cubic B-spline
+        const N = [];
+        for (let i = 0; i < n; i++) {
+            const row = [];
+            const t = i;
+            for (let j = 0; j < n; j++) {
+                row.push(basisFunction(j, degree + 1, t, knots));
+            }
+            N.push(row);
+        }
+
+        // solve 
+        const px =  interpolationPoints.map(p => p.x);
+        const py = interpolationPoints.map(p => p.y);
+        const controlX = solve(N, px);
+        const controlY = solve(N, py);
+
+        const controlPoints = controlX.map((x, i) => ({
+            x,y :controlY[i]}));
+            return {controlPoints, knots};
+        }
+
+        function basisFunction(i, k, t, knots) {
+            if (k === 1) {
+                return (knots[i] <= t && t < knots[i + 1]) ? 1 : 0;
+            } else {
+                const denomA = knots[i + k - 1] - knots[i];
+                const denomB = knots[i + k] - knots[i + 1];
+                const a = denomA === 0 ? 0 : (t - knots[i]) / denomA;
+                const b = denomB === 0 ? 0 : (knots[i + k] - t) / denomB;
+                return a * basisFunction(i, k - 1, t, knots) +
+                    b * basisFunction(i + 1, k - 1, t, knots);
+            }
+        }
+
+        function solve(N, b) {
+            const n = N.length;
+            const m = N[0].length;
+
+            // Gaussian elimination
+            for (let i = 0; i < n; i++) {
+                // Pivoting
+                let maxRow = i;
+                for (let k = i + 1; k < n; k++) {
+                    if (Math.abs(N[k][i]) > Math.abs(N[maxRow][i])) {
+                        maxRow = k;
+                    }
+                }
+                [N[i], N[maxRow]] = [N[maxRow], N[i]];
+                [b[i], b[maxRow]] = [b[maxRow], b[i]];
+
+                // Elimination
+                for (let j = i + 1; j < n; j++) {
+                    const factor = N[j][i] / N[i][i];
+                    for (let k = i; k < m; k++) {
+                        N[j][k] -= factor * N[i][k];
+                    }
+                    b[j] -= factor * b[i];
+                }
+            }
+
+            // Back substitution
+            const x = new Array(n).fill(0);
+            for (let i = n - 1; i >= 0; i--) {
+                x[i] = b[i];
+                for (let j = i + 1; j < n; j++) {
+                    x[i] -= N[i][j] * x[j];
+                }
+                x[i] /= N[i][i];
+            }
+            return x;
+        }
+    
+
         class Panel {
             constructor() {
                 this.x = 0;
@@ -387,8 +477,11 @@
                         return 0;
                     }
                 } else {
-                    let a = (u - this._knots[i]) / (this._knots[i + k - 1] - this._knots[i]);
-                    let b = (this._knots[i + k] - u) / (this._knots[i + k] - this._knots[i + 1]);
+                    let denomA = this._knots[i + k - 1] - this._knots[i];
+                    let denomB = this._knots[i + k] - this._knots[i + 1];
+
+                    let a = denomA == 0 ? 0 : (u - this._knots[i]) / denomA;
+                    let b = denomB == 0 ? 0 : (this._knots[i + k] - u) / denomB;
                     let na = this.calcNormBase(i, k - 1, u);
                     let nb = this.calcNormBase(i + 1, k - 1, u);
                     return a * na + b * nb;
@@ -413,7 +506,6 @@
                 return polyline;
             }
         }
-
         function initContent() {
             let splinePanel = new SplinePanel();
             screen.setRoot(splinePanel);
@@ -428,7 +520,7 @@
                 ];
                 this._selectedPoint = null;
                 this._bspline = new BSpline();
-                this._order = 2;
+                this._order = 4; // Default order for cubic B-spline
                 this._polyline = [];
                 this.updateSpline();
             } 
