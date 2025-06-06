@@ -10,6 +10,13 @@ How to Use
 3.	Drag points to see the curve update in real time.
 4.	Click "Clear" to remove all points and start over.
 How It Works
-•	Use B-Spline interpolation to create smooth curves.
-•	No extra libraries – built with HTML5 Canvas and plain JavaScript.
-•	The curve updates instantly when points are moved.
+1) In the index.html file you can a B-spline approximation that:
+•	creates control points and display them (by adding button).
+•	The BSpline class uses these as control points to generate a B-spline curve using a basis function and a uniform knot vector.
+•	The curve is recalculated every time the control points are changed.
+
+2) In the Cbspline.html file you can see a cubic B-spline interpolation that :
+
+•	Compute uniform knot vectors and B-spline basis functions (Cox-de Boor recursion).
+•	Solving a linear system N⋅P=QN \cdot P = QN⋅P=Q to determine control points so that the B-spline passes through all interpolation points.
+•	Drawing the resulting spline using standard cubic B-spline evaluation.
