@@ -121,7 +121,7 @@
         }
 
         function computecontrolPoints(Interpolationpoints) {
-            const n = Interpolationpoints.length ;
+            const n = Interpolationpoints.length;
             const degree = 3; // Cubic B-spline
             const knotcount = n + degree + 1;
 
@@ -130,32 +130,33 @@
             for (let i = 0; i < knotcount; i++) {
                 if (i < degree) {
                     knots.push(0);
-                } else if (i >n) knots.push(n - degree + 1);
-                 else {
+                } else if (i > n) knots.push(n - degree + 1);
+                else {
                     knots.push(i - degree);
                 }
-        }
-
-        // basic matrix for cubic B-spline
-        const N = [];
-        for (let i = 0; i < n; i++) {
-            const row = [];
-            const t = i;
-            for (let j = 0; j < n; j++) {
-                row.push(basisFunction(j, degree + 1, t, knots));
             }
-            N.push(row);
-        }
 
-        // solve 
-        const px =  interpolationPoints.map(p => p.x);
-        const py = interpolationPoints.map(p => p.y);
-        const controlX = solve(N, px);
-        const controlY = solve(N, py);
+            // basic matrix for cubic B-spline
+            const N = [];
+            for (let i = 0; i < n; i++) {
+                const row = [];
+                const t = i;
+                for (let j = 0; j < n; j++) {
+                    row.push(basisFunction(j, degree + 1, t, knots));
+                }
+                N.push(row);
+            }
 
-        const controlPoints = controlX.map((x, i) => ({
-            x,y :controlY[i]}));
-            return {controlPoints, knots};
+            // solve 
+            const px = interpolationPoints.map(p => p.x);
+            const py = interpolationPoints.map(p => p.y);
+            const controlX = solve(N, px);
+            const controlY = solve(N, py);
+
+            const controlPoints = controlX.map((x, i) => ({
+                x, y: controlY[i]
+            }));
+            return { controlPoints, knots };
         }
 
         function basisFunction(i, k, t, knots) {
@@ -208,7 +209,7 @@
             }
             return x;
         }
-    
+
 
         class Panel {
             constructor() {
@@ -516,14 +517,14 @@
                 super();  // Fixed: Removed great() and added super()
                 this._points = [
                     { x: 100, y: 100 },
-                    
+
                 ];
                 this._selectedPoint = null;
                 this._bspline = new BSpline();
                 this._order = 4; // Default order for cubic B-spline
                 this._polyline = [];
                 this.updateSpline();
-            } 
+            }
 
             onMouseDown(mouse) {
                 this._selectedPoint = this.findPoint(mouse.x, mouse.y);
@@ -649,5 +650,4 @@
         });
     </script>
 </body>
-
 </html>
