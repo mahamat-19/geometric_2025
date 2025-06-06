@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cubic B-Spline Interpolation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        canvas {
+            border: 1px solid #000;
+            display: block;
+            margin-top: 20px;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 8px 12px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Cubic B-Spline Interpolation</h2>
+    <div class="controls">
+        <button id="addPoint">Add</button>
+        <button id="clearPoints">Clear</button>
+        <label>
+            <input type="checkbox" id="showControl" checked> Show Control Points
+        </label>
+    </div>
+    <canvas id="canvas" width="1200" height="450"></canvas>
+    <script>
+        const POINT_RADIUS = 9;
+        const MIN_POINTS = 4;
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        let interpolationPoints = [
+            
+        ];
+        let controlPoints = [];
+        let knots = [];
+        let polyline = [];
+        let draggingIdx = null;
+
+        function computeControlPoints(interpolationPoints) {
+            const n = interpolationPoints.length;
+            if (n < 4) return { controlPoints: [], knots: [] };
+
+            // For cubic B-spline interpolation, we need to solve a system of equations
+            // The matrix is tridiagonal for uniform knots
+
+            // Create uniform knots
+            const degree = 3;
+            const knots = [];
+            for (let i = 0; i < n + degree + 1; i++) {
+                knots.push(i);
+            }
+
+            // For each interpolation point Q_i, we need to find the parameter t_i where it's interpolated
+            // For uniform parameterization, we can use t_i = i
+            const t = [];
+            for (let i = 0; i < n; i++) {
+                t.push(i + degree); // Shift by degree to match the knot vector
+            }
+
+            // Build the coefficient matrix (N) - this is where the basis functions are evaluated at t_i
+            const N = Array(n).fill().map(() => Array(n).fill(0));
+
+            function basis(i, k, x, knots) {
+                if (k === 0) {
+                    return (knots[i] <= x && x < knots[i + 1]) ? 1 : 0;
+                }
+
+                let denom1 = knots[i + k] - knots[i];
+                let term1 = 0;
+                if (denom1 !== 0) {
+                    term1 = ((x - knots[i]) / denom1) * basis(i, k - 1, x, knots);
+                }
+
+                let denom2 = knots[i + k + 1] - knots[i + 1];
+                let term2 = 0;
+                if (denom2 !== 0) {
+                    term2 = ((knots[i + k + 1] - x) / denom2) * basis(i + 1, k - 1, x, knots);
+                }
+
+                return term1 + term2;
+            }
+
+            // Fill the matrix N with basis function values at parameter values t_i
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < n; j++) {
+                    N[i][j] = basis(j, degree, t[i], knots);
+                }
+            }
+
+            // Solve the system N * P = Q for control points P
+            function solveSystem(N, Q) {
+                // Using Gaussian elimination for simplicity
+                // In practice, you might want to use a more robust solver
+                const n = Q.length;
+                let P = Array(n).fill(0);
+
+                // Forward elimination
+                for (let i = 0; i < n; i++) {
+                    // Find the row with maximum element in current column
+                    let maxRow = i;
+                    for (let k = i + 1; k < n; k++) {
+                        if (Math.abs(N[k][i]) > Math.abs(N[maxRow][i])) {
+                            maxRow = k;
+                        }
+                    }
+
+                    // Swap rows
+                    [N[i], N[maxRow]] = [N[maxRow], N[i]];
+                    [Q[i], Q[maxRow]] = [Q[maxRow], Q[i]];
+
+                    // Make all rows below this one 0 in current column
+                    for (let k = i + 1; k < n; k++) {
+                        const factor = N[k][i] / N[i][i];
+                        for (let j = i; j < n; j++) {
+                            N[k][j] -= factor * N[i][j];
+                        }
+                        Q[k] -= factor * Q[i];
+                    }
+                }
+
+                // Back substitution
+                for (let i = n - 1; i >= 0; i--) {
+                    P[i] = Q[i];
+                    for (let j = i + 1; j < n; j++) {
+                        P[i] -= N[i][j] * P[j];
+                    }
+                    P[i] /= N[i][i];
+                }
+
+                return P;
+            }
+
+            // Solve for x and y coordinates separately
+            const Qx = interpolationPoints.map(p => p.x);
+            const Qy = interpolationPoints.map(p => p.y);
+
+            // Make a copy of N for y system
+            const Nx = N.map(row => [...row]);
+            const Ny = N.map(row => [...row]);
+
+            const Px = solveSystem(Nx, Qx);
+            const Py = solveSystem(Ny, Qy);
+
+            // Combine x and y coordinates into control points
+            const controlPoints = Px.map((x, i) => ({ x, y: Py[i] }));
+
+            return { controlPoints, knots };
+        }
+
+        function getSplinePolyline(ctrlPts, knots, degree) {
+            if (ctrlPts.length < degree + 1) return [];
+
+            const pts = [];
+            const n = ctrlPts.length;
+            const u_min = knots[degree];
+            const u_max = knots[n];
+            const steps = 100;
+
+            function basis(i, k, x, knots) {
+                if (k === 0) {
+                    return (knots[i] <= x && x < knots[i + 1]) ? 1 : 0;
+                }
+
+                let denom1 = knots[i + k] - knots[i];
+                let term1 = 0;
+                if (denom1 !== 0) {
+                    term1 = ((x - knots[i]) / denom1) * basis(i, k - 1, x, knots);
+                }
+
+                let denom2 = knots[i + k + 1] - knots[i + 1];
+                let term2 = 0;
+                if (denom2 !== 0) {
+                    term2 = ((knots[i + k + 1] - x) / denom2) * basis(i + 1, k - 1, x, knots);
+                }
+
+                return term1 + term2;
+            }
+
+            for (let s = 0; s <= steps; s++) {
+                const u = u_min + (u_max - u_min) * s / steps;
+
+                let x = 0;
+                let y = 0;
+
+                for (let i = 0; i < n; i++) {
+                    const w = basis(i, degree, u, knots);
+                    x += w * ctrlPts[i].x;
+                    y += w * ctrlPts[i].y;
+                }
+
+                pts.push({ x, y });
+            }
+
+            return pts;
+        }
+
+        function updateCurve() {
+            const res = computeControlPoints(interpolationPoints);
+            controlPoints = res.controlPoints;
+            knots = res.knots;
+            polyline = getSplinePolyline(controlPoints, knots, 3);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw control polygon (orange)
+            if (document.getElementById("showControl").checked && controlPoints.length >= MIN_POINTS) {
+                ctx.strokeStyle = "#888";
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(controlPoints[0].x, controlPoints[0].y);
+                for (let i = 1; i < controlPoints.length; i++)
+                    ctx.lineTo(controlPoints[i].x, controlPoints[i].y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = "#ff9900";
+                for (const p of controlPoints) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, POINT_RADIUS * 0.7, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            }
+
+            // Draw curve (red)
+            if (polyline.length > 1) {
+                ctx.strokeStyle = "#e13";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(polyline[0].x, polyline[0].y);
+                for (let i = 1; i < polyline.length; i++)
+                    ctx.lineTo(polyline[i].x, polyline[i].y);
+                ctx.stroke();
+                ctx.lineWidth = 1;
+            }
+
+            // Draw interpolation points (blue)
+            for (let i = 0; i < interpolationPoints.length; i++) {
+                const p = interpolationPoints[i];
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, POINT_RADIUS, 0, 2 * Math.PI);
+                ctx.fillStyle = "#0077cc";
+                ctx.fill();
+                ctx.strokeStyle = "#FFF";
+                ctx.stroke();
+            }
+        }
+
+        function redrawAll() {
+            updateCurve();
+            draw();
+        }
+
+        // --- Dragging logic ---
+        canvas.addEventListener("mousedown", function (evt) {
+            const rect = canvas.getBoundingClientRect();
+            const mx = evt.clientX - rect.left, my = evt.clientY - rect.top;
+            draggingIdx = null;
+            for (let i = 0; i < interpolationPoints.length; i++) {
+                const p = interpolationPoints[i];
+                if ((p.x - mx) ** 2 + (p.y - my) ** 2 < POINT_RADIUS ** 2 * 1.5) {
+                    draggingIdx = i;
+                    break;
+                }
+            }
+        });
+        canvas.addEventListener("mousemove", function (evt) {
+            if (draggingIdx === null) return;
+            const rect = canvas.getBoundingClientRect();
+            interpolationPoints[draggingIdx].x = evt.clientX - rect.left;
+            interpolationPoints[draggingIdx].y = evt.clientY - rect.top;
+            redrawAll();
+        });
+        canvas.addEventListener("mouseup", function (evt) {
+            draggingIdx = null;
+        });
+
+        // --- UI buttons ---
+        document.getElementById("addPoint").onclick = function () {
+            interpolationPoints.push({
+                x: 30 + Math.random() * (canvas.width - 60),
+                y: 30 + Math.random() * (canvas.height - 60)
+            });
+            redrawAll();
+        };
+
+        document.getElementById("clearPoints").onclick = function () {
+            interpolationPoints = [];
+            redrawAll();
+        };
+
+        document.getElementById("showControl").onchange = function () {
+            draw();
+        };
+
+        // --- Initial draw ---
+        redrawAll();
+        window.addEventListener("resize", function () {
+            canvas.width = window.innerWidth * 0.95;
+            canvas.height = window.innerHeight * 0.6;
+            draw();
+        });
+    </script>
+</body>
+
+</html>
